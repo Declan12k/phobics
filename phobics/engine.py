@@ -68,6 +68,24 @@ class Engine:
 
         # world
         self.world_w, self.world_h = self.base_w, self.base_h
+        # shop & money state
+        self.just_reset = False
+        self.in_shop = False
+        self.money = 0
+        self.shop_buttons = []
+        self.shop_items = [
+            { 'id':'shot_capacity','name':'+1 Shot Capacity','price':5,'desc':'Allows one extra quick shot'},
+            { 'id':'move_speed','name':'Increase Move Speed','price':8,'desc':'Move a bit faster'},
+            { 'id':'shield','name':'Shield (1 hit)','price':12,'desc':'Block one hit'},
+            { 'id':'enemy_slow','name':'Enemy Slowdown','price':10,'desc':'Enemies move slower next stage'},
+            { 'id':'extra_money','name':'Bonus $5','price':6,'desc':'Start next stage with $5'},
+        ]
+        # load shop background
+        try:
+            self.shop_bg = pygame.image.load("assets/textures/shop/shop.png").convert()
+        except Exception:
+            self.shop_bg = None
+
         self.reset_stage()
 
         # projectiles
@@ -82,6 +100,14 @@ class Engine:
         self.title_start_time = time.time()
         self.title_prompt_visible = False
         self.title_prompt_time = 0.0
+
+        # theme & resolution
+        self.theme = 'dark'
+        self.color_schemes = {
+            'dark':{'bg':(28,28,28),'world_bg':(10,10,10),'ui_bg':(45,45,45),'text':(240,240,240),'muted':(170,170,170)},
+            'light':{'bg':(240,240,240),'world_bg':(230,230,230),'ui_bg':(200,200,200),'text':(20,20,20),'muted':(90,90,90)}
+        }
+        self.available_resolutions = [(800,600),(1024,768),(1280,720),(1366,768),(1600,900),(1920,1080)]
 
         # audio & saves dir
         os.makedirs(SAVES_DIR, exist_ok=True)
@@ -114,6 +140,8 @@ class Engine:
         return w,h
 
     def reset_stage(self):
+        # mark that we just reset (used to avoid shop popping immediately)
+        self.just_reset = True
         self.stages_config = self.load_stages_config()
         self.world_w, self.world_h = self.world_size()
         self.player = Rect(40,40,24,24)
@@ -237,6 +265,11 @@ class Engine:
             if self.player.colliderect(c):
                 try: self.collectibles.remove(c)
                 except Exception: pass
+                # Collectible gives $1
+                try:
+                    self.money += 1
+                except Exception:
+                    pass
                 snd=self.assets.get("collect_snd")
                 if snd:
                     try: snd.play()
@@ -247,9 +280,19 @@ class Engine:
             if self.player.colliderect(r):
                 self.restart_stage(); return
 
-        if not self.collectibles:
-            if self.stage < self.MAX_STAGES: self.stage += 1
-            self.reset_stage()
+        if not self.collectibles and not getattr(self, 'just_reset', False):
+            # Open shop every 3 completed stages (3,6,9...) before advancing
+            if self.stage < self.MAX_STAGES and (self.stage % 3) == 0:
+                self.in_shop = True
+                self.paused = True
+                self.build_shop_buttons()
+            else:
+                if self.stage < self.MAX_STAGES: self.stage += 1
+                self.reset_stage()
+
+        # clear the just_reset flag after one update frame
+        if getattr(self, 'just_reset', False):
+            self.just_reset = False
 
         mx,my = pygame.mouse.get_pos()
         wx = mx - (self.window_w - self.world_w)//2
@@ -349,6 +392,48 @@ class Engine:
             tint2 = pygame.Surface((self.window_w, self.window_h), pygame.SRCALPHA); tint2.fill((0,0,5,20)); self.screen.blit(tint2, (1,0))
             self.screen.blit(crt,(0,0))
 
+
+        # --- Shop UI (between stages) ---
+        if self.in_shop:
+            overlay = pygame.Surface((self.window_w, self.window_h), pygame.SRCALPHA)
+            overlay.fill((0,0,0,220))
+            self.screen.blit(overlay, (0,0))
+            if getattr(self,'shop_bg',None) is not None:
+                bg=self.shop_bg; bw,bh = bg.get_size(); scale = min(self.window_w/bw, self.window_h/bh)
+                nw,nh = int(bw*scale), int(bh*scale)
+                bg_s = pygame.transform.smoothscale(bg,(nw,nh)); x=(self.window_w-nw)//2; y=(self.window_h-nh)//2; self.screen.blit(bg_s,(x,y))
+            font_s = pygame.font.SysFont(None,44)
+            title = font_s.render('BACK-ALLEY VENDOR', True, self.color_schemes[self.theme]['text'])
+            tr = title.get_rect(center=(self.window_w//2, int(self.window_h*0.12)))
+            self.screen.blit(title,tr)
+            small = pygame.font.SysFont(None,20)
+            desc = small.render('Deals are scarce. Spend your dollars wisely.', True, self.color_schemes[self.theme]['muted'])
+            dr = desc.get_rect(center=(self.window_w//2, int(self.window_h*0.18)))
+            self.screen.blit(desc, dr)
+            font_item = pygame.font.SysFont(None,28)
+            sx = (self.window_w - 720)//2
+            sy = int(self.window_h*0.24)
+            for i,item in enumerate(self.shop_items):
+                rx = sx + (i%2)*360
+                ry = sy + (i//2)*110
+                rect = Rect(rx, ry, 340, 90)
+                pygame.draw.rect(self.screen, self.color_schemes[self.theme]['ui_bg'], rect)
+                pygame.draw.rect(self.screen, (160,160,160), rect, 2)
+                name = font_item.render(item['name'], True, self.color_schemes[self.theme]['text'])
+                price = font_item.render(f"${item['price']}", True, (200,200,120))
+                self.screen.blit(name, (rect.x + 12, rect.y + 8))
+                self.screen.blit(price, (rect.x + rect.width - price.get_width() - 12, rect.y + 8))
+                desc = pygame.font.SysFont(None,18).render(item.get('desc',''), True, self.color_schemes[self.theme]['muted'])
+                self.screen.blit(desc, (rect.x + 12, rect.y + 40))
+                if len(self.shop_buttons) <= i:
+                    self.shop_buttons.append((rect, item['id'], item['price']))
+            bx = (self.window_w - 260)//2; by = sy + 3*110
+            back_rect = Rect(bx, by, 260, 48)
+            pygame.draw.rect(self.screen, (70,70,70), back_rect); pygame.draw.rect(self.screen, (190,190,190), back_rect, 2)
+            btxt = pygame.font.SysFont(None,30).render('Leave', True, self.color_schemes[self.theme]['text'])
+            self.screen.blit(btxt, (back_rect.x + 80, back_rect.y + 10))
+            money_txt = pygame.font.SysFont(None,24).render(f"Money: ${self.money}", True, self.color_schemes[self.theme]['text'])
+            self.screen.blit(money_txt, (12, self.window_h - 32))
         # Menus: draw overlays and buttons (kept minimal; actions are wired in main)
         if self.in_menu:
             overlay = pygame.Surface((self.window_w, self.window_h), pygame.SRCALPHA); overlay.fill((0,0,0,140)); self.screen.blit(overlay,(0,0))
@@ -457,6 +542,33 @@ class Engine:
     def close_menu(self):
         self.in_menu=False; self.paused=False; self.menu_buttons=[]
 
+    def build_shop_buttons(self):
+        self.shop_buttons = []
+
+    def apply_shop_item(self, item_id):
+        item = next((it for it in self.shop_items if it['id']==item_id), None)
+        if not item: return False
+        price = item.get('price', 0)
+        if self.money < price: return False
+        self.money -= price
+        if item_id == 'shot_capacity':
+            self.shot_available = True
+        elif item_id == 'move_speed':
+            self.player_speed_multiplier = getattr(self,'player_speed_multiplier',1.0) + 0.15
+        elif item_id == 'shield':
+            self.shield = True
+        elif item_id == 'enemy_slow':
+            self.enemy_speed_multiplier = max(0.4, getattr(self,'enemy_speed_multiplier',1.0) * 0.8)
+        elif item_id == 'extra_money':
+            self.money += 5
+        return True
+
+    def close_shop(self):
+        self.in_shop = False
+        self.paused = False
+        self.stage = min(self.MAX_STAGES, self.stage + 1)
+        self.reset_stage()
+
     def open_options(self):
         self.menu_buttons=[]; self.in_menu=False; self.in_options=True; self.paused=True; self.options_buttons=ui.build_options_buttons(self.window_w, self.window_h)
 
@@ -510,9 +622,42 @@ class Engine:
         self.stage=1; self.reset_stage(); self.close_menu()
 
     # ---------- convenient builders ----------
+
+    def build_options_buttons(self):
+        self.options_buttons = []
+        w,h = 360,44
+        sx = (self.window_w - w)//2
+        sy = (self.window_h - 300)//2
+        for i, (rw,rh) in enumerate(self.available_resolutions[:4]):
+            rect = Rect(sx, sy + i*56, w, 44)
+            label = f"Resolution: {rw}x{rh}"
+            def make_action(_rw=rw, _rh=rh): return lambda: self.set_resolution(_rw, _rh)
+            self.options_buttons.append((rect, label, make_action()))
+        rectt = Rect(sx, sy + 4*56, w, 44)
+        lbl = f"Theme: {self.theme.title()} (click to toggle)"
+        self.options_buttons.append((rectt, lbl, lambda: self.toggle_theme()))
+
+    def set_resolution(self, w, h):
+        try:
+            self.window_w, self.window_h = int(w), int(h)
+            self.screen = pygame.display.set_mode((self.window_w, self.window_h))
+            self.world_w, self.world_h = self.world_size()
+            self.build_front_menu(); self.build_slot_buttons(); self.reset_stage()
+        except Exception as e:
+            print('[options] failed to set resolution', e)
+
+    def toggle_theme(self):
+        self.theme = 'light' if self.theme == 'dark' else 'dark'
+
     def build_front_menu(self):
         # produce button list and optionally populate actions in main (actions are bound in main)
         self.front_menu_buttons = ui.build_front_menu(self.window_w, self.window_h)
+        try:
+            w,h = 300,48
+            sx=(self.window_w - w)//2; sy=(self.window_h - 240)//2
+            self.front_menu_buttons.append((Rect(sx, sy + 4*64, w, h), 'Options', self.open_options))
+        except Exception:
+            pass
 
     def build_slot_buttons(self):
         slots = self.list_slots()
