@@ -327,6 +327,7 @@ class Engine:
             (Rect(sx, sy + 1*64, w, h), "Continue", self.continue_most_recent),
             (Rect(sx, sy + 2*64, w, h), "Load", self.open_load_slot_menu),
             (Rect(sx, sy + 3*64, w, h), "Back", self.back_to_title),
+            (Rect(sx, sy + 4*64, w, h), "Quit", self.quit_game),
         ]
 
     def build_slot_buttons(self):
