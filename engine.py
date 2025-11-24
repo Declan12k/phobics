@@ -82,7 +82,7 @@ class Engine:
         ]
         # load shop background
         try:
-            self.shop_bg = pygame.image.load(os.path.join(TEX_DIR, 'shop', 'shop.png')).convert()
+            self.shop_bg = pygame.image.load("assets/textures/shop/shop.png").convert()
         except Exception:
             self.shop_bg = None
 
